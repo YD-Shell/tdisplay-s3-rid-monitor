@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>无人机 RID 智慧监测大屏</title>
+<!-- ============ 高德地图配置 ============
+     1) 到 https://lbs.amap.com 注册开发者, 创建 Web端(JS API) 应用
+     2) 把下面两个值替换成你自己的 Key 与安全密钥
+     3) 无 Key 也能打开页面(列表/详情可用), 只是地图区域显示提示
+     Key 与安全密钥在登录成功后才生效(登录页阶段零外部请求)
+======================================= -->
+<script>
+  window._AMapSecurityConfig = { securityJsCode: "YOUR_SECURITY_JS_CODE" };
+  const AMAP_KEY = "YOUR_AMAP_KEY";
+  const AMAP_JS = AMAP_KEY.startsWith("YOUR_")
+    ? null
+    : "https://webapi.amap.com/maps?v=2.0&key=" + AMAP_KEY +
+      "&plugin=AMap.Scale,AMap.ToolBar,AMap.MapType";
+</script>
+<style>
+  :root{
+    --bg:#070b14; --panel:#0d1524; --panel2:#111b2e; --line:#1c2a44;
+    --cyan:#00e5ff; --blue:#4da3ff; --green:#00e676; --amber:#ffd54a;
+    --red:#ff5252; --purple:#b388ff; --txt:#dce6f5; --dim:#7b8aa3;
+    --font: "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    --mono: Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--txt);font-family:var(--font);
+       background-image:radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,140,255,.12), transparent),
+                        radial-gradient(ellipse 60% 40% at 90% 110%, rgba(0,229,255,.06), transparent);
+       display:flex;flex-direction:column}
+  /* ---------- 登录页 ---------- */
+  #loginOverlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse 70% 60% at 50% 30%,rgba(0,80,180,.25),transparent),#070b14}
+  .loginBox{width:340px;padding:36px 34px;background:linear-gradient(180deg,#0d1524,#0a1220);
+    border:1px solid var(--line);border-radius:14px;text-align:center;
+    box-shadow:0 0 60px rgba(0,120,255,.15), inset 0 0 30px rgba(0,0,0,.4)}
+  .loginBox .lt{font-size:19px;letter-spacing:4px;font-weight:700;color:#fff;
+    text-shadow:0 0 18px rgba(0,229,255,.4)}
+  .loginBox .ls{font-size:11px;color:var(--dim);letter-spacing:3px;margin:8px 0 26px}
+  .loginBox .lock{width:52px;height:52px;margin:0 auto 18px;border-radius:50%;
+    border:2px solid var(--cyan);display:flex;align-items:center;justify-content:center;
+    font-size:24px;box-shadow:0 0 24px rgba(0,229,255,.35)}
+  .loginBox input{width:100%;background:#0a1424;border:1px solid var(--line);border-radius:8px;
+    color:var(--txt);font-size:14px;padding:11px 14px;margin-bottom:12px;outline:none;font-family:var(--font)}
+  .loginBox input:focus{border-color:var(--cyan);box-shadow:0 0 10px rgba(0,229,255,.2)}
+  .loginBox button{width:100%;background:linear-gradient(180deg,#0b8fd4,#086aa6);border:none;
+    color:#fff;font-size:15px;letter-spacing:6px;padding:12px;border-radius:8px;cursor:pointer;
+    font-family:var(--font);margin-top:6px;transition:all .15s}
+  .loginBox button:hover{filter:brightness(1.2);box-shadow:0 0 20px rgba(0,150,255,.4)}
+  #loginErr{color:var(--red);font-size:12px;margin-top:12px;min-height:16px}
+  /* ---------- 陌生无人机警报 ---------- */
+  #alertBanner{position:fixed;top:0;left:0;right:0;z-index:9995;display:flex;align-items:center;gap:14px;
+    padding:10px 18px;background:linear-gradient(90deg,#3a0505,#6b0a0a,#3a0505);color:#fff;
+    border-bottom:2px solid var(--red);font-size:14px;letter-spacing:1px;
+    box-shadow:0 4px 24px rgba(255,0,0,.45)}
+  #alertBanner.hidden{display:none}
+  #alertBanner .txt{flex:1}
+  #alertBanner .txt b{color:var(--amber)}
+  #alertBanner button{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.35);
+    border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;font-family:var(--font)}
+  #alertBanner button:hover{background:rgba(255,255,255,.25)}
+  body.alert::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:9990;
+    border:7px solid rgba(255,30,30,.95);box-shadow:inset 0 0 140px rgba(255,0,0,.55);
+    animation:alarmFlash .55s infinite}
+  @keyframes alarmFlash{0%,100%{opacity:1}50%{opacity:.12}}
+  .shield{color:var(--green);font-size:12px;letter-spacing:0}
+  .btnSmall{background:#123a2a;border:1px solid var(--green);color:var(--green);border-radius:6px;
+    padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)}
+  .btnSmall:hover{background:#1c5038}
+  .btnSmall.danger{background:#3a1212;border-color:var(--red);color:var(--red)}
+  .btnSmall.danger:hover{background:#552020}
+  /* ---------- 顶栏 ---------- */
+  #topbar{height:56px;flex:none;display:flex;align-items:center;gap:18px;padding:0 18px;
+          background:linear-gradient(180deg,#0c1626,#0a1220);border-bottom:1px solid var(--line);
+          box-shadow:0 2px 18px rgba(0,0,0,.6);z-index:5}
+  #topbar .logo{display:flex;align-items:center;gap:10px}
+  #topbar .logo .dot{width:10px;height:10px;border-radius:50%;background:var(--cyan);
+                     box-shadow:0 0 12px var(--cyan);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  #topbar h1{font-size:17px;letter-spacing:3px;font-weight:600}
+  #topbar h1 small{font-size:11px;color:var(--dim);letter-spacing:1px;margin-left:8px;font-weight:normal}
+  #topbar .spacer{flex:1}
+  .stat{display:flex;gap:22px}
+  .stat .item{text-align:center}
+  .stat .item .v{font-family:var(--mono);font-size:19px;color:var(--cyan);text-shadow:0 0 14px rgba(0,229,255,.5)}
+  .stat .item .l{font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:2px}
+  #clock{font-family:var(--mono);font-size:20px;color:var(--txt);letter-spacing:2px;
+         border-left:1px solid var(--line);padding-left:18px}
+  #conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);
+        border:1px solid var(--line);border-radius:20px;padding:5px 13px}
+  #conn .lamp{width:9px;height:9px;border-radius:50%;background:#666}
+  #conn.ok .lamp{background:var(--green);box-shadow:0 0 10px var(--green)}
+  #conn.err .lamp{background:var(--red);box-shadow:0 0 10px var(--red)}
+  /* ---------- 主体三栏 ---------- */
+  #main{flex:1;display:flex;gap:10px;padding:10px;min-height:0}
+  .col{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+       display:flex;flex-direction:column;min-height:0;position:relative;
+       box-shadow:inset 0 0 30px rgba(0,0,0,.35)}
+  .col .cap{flex:none;font-size:12px;letter-spacing:3px;color:var(--dim);
+            padding:10px 14px 8px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+  .col .cap .cnt{color:var(--cyan);font-family:var(--mono)}
+  /* 左: 列表 */
+  #listCol{width:300px;flex:none}
+  #listBody{flex:1;overflow-y:auto;padding:8px}
+  #listBody::-webkit-scrollbar{width:5px}
+  #listBody::-webkit-scrollbar-thumb{background:#22304c;border-radius:3px}
+  .tabs{display:flex;gap:6px;align-items:center}
+  .tab{background:none;border:1px solid #22304c;color:var(--dim);font-size:12px;padding:3px 10px;border-radius:6px;cursor:pointer;transition:.15s}
+  .tab:hover{border-color:#2b4a78}
+  .tab.on{background:#0e3a52;border-color:#00a6d6;color:#00e5ff}
+  #recBody{flex:1;overflow-y:auto;padding:8px}
+  #recBody::-webkit-scrollbar{width:5px}
+  #recBody::-webkit-scrollbar-thumb{background:#22304c;border-radius:3px}
+  .rec{background:var(--panel);border:1px solid #1c2b45;border-radius:8px;padding:8px;margin-bottom:8px;cursor:pointer;transition:.15s}
+  .rec:hover{border-color:#2b4a78}
+  .rec .rt{font-size:12px;color:#fff;font-weight:600}
+  .rec .rm{font-size:11px;color:var(--dim);margin-top:2px;word-break:break-all}
+  .rec .rs{font-size:11px;color:var(--dim);margin-top:2px}
+  .rec .rb{margin-top:6px;font-size:11px;color:#00e5ff}
+  #statsBody{flex:1;overflow-y:auto;padding:8px}
+  .statCard{background:var(--panel);border:1px solid #1c2b45;border-radius:8px;padding:10px;margin-bottom:8px}
+  .statCard h4{margin:0 0 8px;font-size:12px;color:#00e5ff}
+  .statRow{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-bottom:4px}
+  .statRow b{color:#fff}
+  .barWrap{background:#101a2e;border-radius:4px;height:14px;overflow:hidden;margin-top:3px}
+  .bar{background:linear-gradient(90deg,#0e5a86,#00b3e6);height:100%;border-radius:4px}
+  .recTool{display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid #16233c}
+  .btnSmall{background:#0e3a52;border:1px solid #00a6d6;color:#00e5ff;font-size:11px;padding:3px 10px;border-radius:6px;cursor:pointer}
+  .btnSmall:hover{background:#12506e}
+  #replayBar{position:absolute;left:12px;right:12px;bottom:8px;background:rgba(7,11,20,.92);border:1px solid #1c2b45;
+             border-radius:8px;padding:8px 12px;display:none;z-index:200;font-size:12px;color:#fff}
+  #replayBar .rp{color:#00e5ff;margin-right:10px}
+  .drow{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:8px;
+        cursor:pointer;background:var(--panel2);transition:all .15s;position:relative}
+  .drow:hover{border-color:#2c3f66;transform:translateX(2px)}
+  .drow.sel{border-color:var(--cyan);box-shadow:0 0 12px rgba(0,229,255,.25)}
+  .drow .top{display:flex;align-items:center;gap:8px}
+  .drow .model{font-size:14px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drow .rssi{font-family:var(--mono);font-size:13px;color:var(--cyan)}
+  .drow .id{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:4px;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drow .pos{font-family:var(--mono);font-size:10px;color:#5d6f8c;margin-top:2px}
+  .sig{display:inline-flex;gap:2px;align-items:flex-end;height:12px}
+  .sig i{width:3px;background:var(--dim);border-radius:1px}
+  .sig i.on{background:var(--cyan)}
+  .drow .mark{position:absolute;right:9px;bottom:8px;font-size:9px;color:#5d6f8c;letter-spacing:1px}
+  /* 中: 地图 */
+  #mapCol{flex:1}
+  #map{flex:1;border-radius:0 0 10px 10px}
+  #mapTip{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;
+          align-items:center;justify-content:center;color:var(--dim);text-align:center;padding:30px}
+  #mapTip b{color:var(--amber);font-size:15px}
+  #mapTip code{color:var(--cyan);font-family:var(--mono);font-size:12px}
+  /* 右: 详情 */
+  #detailCol{width:330px;flex:none}
+  #detailBody{flex:1;overflow-y:auto;padding:12px 14px}
+  #detailBody::-webkit-scrollbar{width:5px}
+  #detailBody::-webkit-scrollbar-thumb{background:#22304c;border-radius:3px}
+  #noSel{color:var(--dim);font-size:13px;text-align:center;margin-top:60px;line-height:2}
+  .dhero{border:1px solid #3a1220;background:linear-gradient(180deg,#2a0c16,#1a0810);
+         border-radius:8px;padding:14px 12px;margin-bottom:10px;position:relative;overflow:hidden}
+  .dhero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+                background:linear-gradient(90deg,var(--red),transparent)}
+  .dhero .m{font-size:20px;font-weight:700;letter-spacing:1px;color:#fff}
+  .dhero .t{font-size:11px;color:#c98;margin-top:5px;display:flex;gap:8px;align-items:center}
+  .tag{display:inline-block;font-size:10px;padding:1px 8px;border-radius:9px;letter-spacing:1px}
+  .tag.astm{background:#0e2a3a;color:var(--cyan);border:1px solid #16445c}
+  .tag.cn{background:#2a1d0e;color:var(--amber);border:1px solid #4c3a14}
+  .kv{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
+  .kv .row{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid #15203a}
+  .kv .row:last-child{border-bottom:none}
+  .kv .k{width:86px;flex:none;color:var(--dim);font-size:12px;letter-spacing:1px}
+  .kv .v{flex:1;font-family:var(--mono);font-size:13px;color:var(--txt);text-align:right}
+  .kv .v.cyan{color:var(--cyan)} .kv .v.green{color:var(--green)}
+  .kv .v.amber{color:var(--amber)} .kv .v.red{color:var(--red)} .kv .v.dim{color:var(--dim)}
+  .group{font-size:11px;color:var(--dim);letter-spacing:2px;margin:14px 2px 8px;display:flex;align-items:center;gap:8px}
+  .group::after{content:"";flex:1;height:1px;background:var(--line)}
+  /* 底部条 */
+  #bottombar{height:34px;flex:none;display:flex;align-items:center;gap:16px;padding:0 16px;
+             background:#0a1220;border-top:1px solid var(--line);font-size:11px;color:var(--dim)}
+  #bottombar .msg{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #bottombar .m2{font-family:var(--mono);color:#5d6f8c}
+  /* 地图自定义标记 */
+  .mk{width:16px;height:16px;border-radius:50%;border:2px solid #fff;
+      box-shadow:0 0 10px rgba(0,229,255,.8);position:relative}
+  .mk.drone{background:var(--cyan)}
+  .mk.op{background:var(--green);box-shadow:0 0 10px rgba(0,230,118,.8)}
+  .mk.sel{background:var(--amber);box-shadow:0 0 14px rgba(255,213,74,1)}
+</style>
+</head>
+<body>
+
+<!-- ================= 登录页 ================= -->
+<div id="loginOverlay">
+  <div class="loginBox">
+    <div class="lock">🔒</div>
+    <div class="lt">无人机 RID 智慧监测大屏</div>
+    <div class="ls">REMOTE ID MONITOR · 授权访问</div>
+    <input id="loginUser" placeholder="用户名" autocomplete="username">
+    <input id="loginPass" type="password" placeholder="密码" autocomplete="current-password">
+    <button id="loginBtn">登 录</button>
+    <div id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ================= 陌生无人机警报条 ================= -->
+<div id="alertBanner" class="hidden">
+  <span class="txt" id="alertText"></span>
+  <button id="alertAuth">加入白名单</button>
+  <button id="alertIgnore">忽略本次</button>
+</div>
+
+<!-- ================= 顶栏 ================= -->
+<div id="topbar">
+  <div class="logo"><div class="dot"></div><h1>无人机 RID 智慧监测大屏<small>REMOTE ID MONITOR</small></h1></div>
+  <div class="spacer"></div>
+  <div id="conn" class="err"><span class="lamp"></span><span id="connText">未连接</span></div>
+  <div class="stat">
+    <div class="item"><div class="v" id="stN">0</div><div class="l">无人机</div></div>
+    <div class="item"><div class="v" id="stPos">0</div><div class="l">有坐标</div></div>
+    <div class="item"><div class="v" id="stCh">--</div><div class="l">信道</div></div>
+    <div class="item"><div class="v" id="stBat">--</div><div class="l">设备电量</div></div>
+  </div>
+  <div id="clock">--:--:--</div>
+</div>
+
+<!-- ================= 主体 ================= -->
+<div id="main">
+  <div class="col" id="listCol">
+    <div class="cap tabs">
+      <button class="tab on" id="tabLive" onclick="showTab('live')">无人机列表 <span class="cnt" id="listCnt">0 架</span></button>
+      <button class="tab" id="tabRec" onclick="showTab('rec')">飞行记录 <span class="cnt" id="recCnt">0</span></button>
+      <button class="tab" id="tabStats" onclick="showTab('stats')">统计</button>
+    </div>
+    <div id="listBody"></div>
+    <div id="recBody" style="display:none">
+      <div class="recTool" style="display:flex">
+        <button class="btnSmall" onclick="exportGPX()">导出 GPX</button>
+        <button class="btnSmall" onclick="exportCSV()">导出 CSV</button>
+      </div>
+    </div>
+    <div id="statsBody" style="display:none"></div>
+  </div>
+
+  <div class="col" id="mapCol">
+    <div class="cap">态势地图 · 高德 <span class="cnt" id="mapCnt">--</span></div>
+    <div id="map">
+      <div id="mapTip">
+        <b>地图未加载</b>
+        <span>请在高德开放平台申请 <b>Web端(JS API)</b> 的 Key,<br>然后修改 dashboard.html 顶部的配置:</span>
+        <code>AMAP_KEY = "你的Key"</code>
+        <code>securityJsCode = "你的安全密钥"</code>
+        <span style="font-size:11px">列表与详情功能不受影响, 可直接查看数据。</span>
+      </div>
+    </div>
+    <div id="replayBar">
+      <span class="rp" id="replayName">回放中</span>
+      <span id="replayProg">0%</span>
+      <button class="btnSmall" onclick="stopReplay()" style="float:right">停止回放</button>
+    </div>
+  </div>
+
+  <div class="col" id="detailCol">
+    <div class="cap">详细信息<span class="cnt" id="detailName">--</span></div>
+    <div id="detailBody">
+      <div id="noSel">👈 从左侧列表或地图上<br>点击选择一架无人机</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 底部 ================= -->
+<div id="bottombar">
+  <span class="msg" id="bottomMsg">请先登录…</span>
+  <span class="m2" id="bottomStats"></span>
+</div>
+
+<script>
+"use strict";
+/* ================= 全局状态 ================= */
+const drones = new Map();     // mac -> drone 数据
+let selectedMac = null;       // 当前选中无人机
+let map = null, mapLoaded = false;
+const markers = new Map();    // mac -> {drone, op, line}
+let ws = null, wsReconnect = 0;
+
+/* ================= 登录认证 =================
+   默认账号 admin / admin123 —— 部署前请修改下方 AUTH 配置!
+   登录成功前不发起任何网络请求(高德/串口数据均登录后才连接) */
+const AUTH = { user: "admin", pass: "admin123" };
+function doLogin(){
+  const u = document.getElementById("loginUser").value.trim();
+  const p = document.getElementById("loginPass").value;
+  if (u === AUTH.user && p === AUTH.pass) {
+    sessionStorage.setItem("rid_auth", "1");
+    enterApp();
+  } else {
+    document.getElementById("loginErr").textContent = "用户名或密码错误";
+  }
+}
+function enterApp(){
+  document.getElementById("loginOverlay").style.display = "none";
+  ensureAudio();              // 登录点击 = 用户手势, 解锁警报声音
+  if (AMAP_JS) loadAMapScript();   // 登录后才加载高德脚本
+  connectWS();                // 登录后才建立数据通道
+}
+
+/* ================= 白名单(授权) ================= */
+let whitelist = new Set();
+try { whitelist = new Set(JSON.parse(localStorage.getItem("rid_whitelist") || "[]")); } catch (e) {}
+function saveWL(){ localStorage.setItem("rid_whitelist", JSON.stringify([...whitelist])); }
+function isWhitelisted(mac){ return whitelist.has(mac); }
+function whitelistAdd(mac){ whitelist.add(mac); saveWL(); renderList(); renderDetail(); logMsg("已加入白名单: " + mac); }
+function whitelistRemove(mac){ whitelist.delete(mac); saveWL(); renderList(); renderDetail(); logMsg("已移出白名单: " + mac); }
+
+/* ================= 陌生无人机警报 ================= */
+const alerted = new Set();    // 本次会话已警报过的陌生 mac
+const ignored = new Set();    // 本次会话手动忽略的 mac
+let alertMac = null;          // 当前警报的无人机 mac
+let actx = null;
+function ensureAudio(){
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+  } catch (e) {}
+}
+function playAlarm(){
+  if (!actx || actx.state !== "running") return;   // 浏览器未解锁音频时仅视觉警报
+  const t0 = actx.currentTime;
+  for (let i = 0; i < 3; i++) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = "square"; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.35, t0 + i * 0.45);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + i * 0.45 + 0.3);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t0 + i * 0.45); o.stop(t0 + i * 0.45 + 0.32);
+  }
+}
+function checkAlerts(presentMacs){
+  // 已消失的陌生机: 复位警报状态(下次再出现重新警报)
+  for (const mac of [...alerted]) if (!presentMacs.has(mac)) alerted.delete(mac);
+  for (const mac of presentMacs) {
+    if (whitelist.has(mac) || ignored.has(mac) || alerted.has(mac)) continue;
+    const d = drones.get(mac);
+    if (!d) continue;
+    alerted.add(mac);
+    triggerAlert(d);
+  }
+}
+function triggerAlert(d){
+  alertMac = d.mac;
+  document.body.classList.add("alert");
+  const b = document.getElementById("alertBanner");
+  b.classList.remove("hidden");
+  document.getElementById("alertText").innerHTML =
+    `⚠ 发现陌生无人机 <b>${esc(d.model || "未知机型")}</b> · ${esc(d.mac)} · 信号 ${d.rssi}dBm`;
+  playAlarm();
+  logMsg("⚠ 警报: 陌生无人机 " + (d.model || d.mac));
+}
+function stopAlert(){
+  alertMac = null;
+  document.body.classList.remove("alert");
+  document.getElementById("alertBanner").classList.add("hidden");
+}
+document.getElementById("alertAuth").onclick = () => {
+  if (alertMac) { whitelistAdd(alertMac); alerted.delete(alertMac); }
+  stopAlert();
+};
+document.getElementById("alertIgnore").onclick = () => {
+  if (alertMac) ignored.add(alertMac);
+  stopAlert();
+};
+
+/* ================= WebSocket ================= */
+const WS_PORT = new URLSearchParams(location.search).get("ws") || 8765;
+function connectWS(){
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const host = location.hostname || "localhost";   // file:// 下 hostname 为空, 兜底
+  ws = new WebSocket(`${proto}://${host}:${WS_PORT}/`);
+  ws.onopen = () => {
+    document.getElementById("conn").className = "ok";
+    document.getElementById("connText").textContent = "数据已连接";
+    logMsg("数据通道已连接");
+  };
+  ws.onclose = () => {
+    document.getElementById("conn").className = "err";
+    document.getElementById("connText").textContent = "数据未连接";
+    if (wsReconnect === 0) {
+      logMsg("⚠ 未连接到数据服务: 请先运行  python server.py --port COMx  (x=你的串口号)");
+    }
+    setTimeout(connectWS, Math.min(3000 + wsReconnect++ * 1000, 10000));
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    let snap;
+    try { snap = JSON.parse(e.data); } catch { return; }
+    if (snap.t === "snap") onSnap(snap);
+  };
+}
+
+/* ================= 数据处理 ================= */
+/* ================= 飞行记录(轨迹+会话) ================= */
+let records = [];
+try { records = JSON.parse(localStorage.getItem("rid_records") || "[]"); } catch { records = []; }
+let recLine = null;   // 当前高亮的记录路径 Polyline
+
+function recordTraitPoint(entry, d){
+  if (d.lat === undefined) return;
+  const now = Date.now();
+  const last = entry.trail[entry.trail.length - 1];
+  // 去重: 静止(<8s 且坐标几乎不变)不记录
+  if (last && now - last.t < 8000 &&
+      Math.abs(last.lat - d.lat) < 0.0008 && Math.abs(last.lon - d.lon) < 0.0008) return;
+  entry.trail.push({ lat: d.lat, lon: d.lon, t: now });
+  if (entry.trail.length > 300) entry.trail.shift();
+}
+
+function finalizeRecord(mac, d){
+  if (!d.trail || d.trail.length < 2) return;
+  const rec = {
+    mac: mac,
+    model: d.model || d.id || "未知",
+    start: d.firstSeen || Date.now(),
+    end: Date.now(),
+    n: d.trail.length,
+    maxAlt: typeof d.alt === "number" ? d.alt : 0,
+    maxSpd: typeof d.spd === "number" ? d.spd : 0,
+    points: d.trail
+  };
+  records.unshift(rec);
+  if (records.length > 50) records.length = 50;
+  try { localStorage.setItem("rid_records", JSON.stringify(records)); } catch {}
+  renderRecords();
+}
+
+function fmtTime(t){
+  const d = new Date(t);
+  const p = n => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function fmtDur(a, b){
+  const s = Math.max(1, Math.round((b - a) / 1000));
+  return s < 60 ? s + " 秒" : Math.floor(s / 60) + " 分 " + (s % 60) + " 秒";
+}
+
+function renderRecords(){
+  const body = document.getElementById("recBody");
+  document.getElementById("recCnt").textContent = records.length;
+  if (!records.length) {
+    body.innerHTML = '<div style="color:var(--dim);font-size:12px;text-align:center;margin-top:30px">暂无飞行记录<br><span style="font-size:11px">无人机消失后自动生成记录</span></div>';
+    return;
+  }
+  body.innerHTML = records.map((r, i) => `
+    <div class="rec" onclick="showRecordPath(${i})">
+      <div class="rt">${esc(r.model)}</div>
+      <div class="rm">${esc(r.mac)}</div>
+      <div class="rs">${fmtTime(r.start)} ~ ${fmtTime(r.end)} · ${r.n} 航点 · 时长 ${fmtDur(r.start, r.end)}</div>
+      <div class="rb">📌 查看轨迹路径 &nbsp;|&nbsp; <span onclick="event.stopPropagation();playRecord(${i})" style="color:#ffb020">▶ 动画回放</span></div>
+    </div>`).join("");
+}
+
+function showTab(tab){
+  document.getElementById("tabLive").classList.toggle("on", tab === "live");
+  document.getElementById("tabRec").classList.toggle("on", tab === "rec");
+  document.getElementById("tabStats").classList.toggle("on", tab === "stats");
+  document.getElementById("listBody").style.display = tab === "live" ? "" : "none";
+  document.getElementById("recBody").style.display = tab === "rec" ? "" : "none";
+  document.getElementById("statsBody").style.display = tab === "stats" ? "" : "none";
+  if (tab === "rec") renderRecords();
+  if (tab === "stats") renderStats();
+}
+
+/* ================= 方向角(距监测点) ================= */
+// 监测点(本机位置)——按实际部署修改。注意: 从高德地图取的坐标即 GCJ-02, 与地图一致
+const MONITOR_LAT = 39.9042, MONITOR_LON = 116.4074;
+
+// 坐标转换: RID 广播坐标为 WGS-84, 高德地图使用 GCJ-02(火星坐标)
+// 中国大陆不转换会偏移 300~600 米。1=转换(默认开, 境外或特殊需求可关)
+const COORD_CONVERT = true;
+function wgsToGcj(lat, lon){
+  if (!COORD_CONVERT) return [lat, lon];
+  if (lat < 0.8293 || lat > 55.8271 || lon < 72.004 || lon > 137.8347) return [lat, lon];  // 境外不转
+  const a = 6378245.0, ee = 0.00669342162296594323;
+  function tLat(x, y){
+    let r = -100.0 + 2.0*x + 3.0*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x));
+    r += (20.0*Math.sin(6.0*x*Math.PI) + 20.0*Math.sin(2.0*x*Math.PI)) * 2.0/3.0;
+    r += (20.0*Math.sin(y*Math.PI) + 40.0*Math.sin(y/3.0*Math.PI)) * 2.0/3.0;
+    r += (160.0*Math.sin(y/12.0*Math.PI) + 320.0*Math.sin(y*Math.PI/30.0)) * 2.0/3.0;
+    return r;
+  }
+  function tLon(x, y){
+    let r = 300.0 + x + 2.0*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x));
+    r += (20.0*Math.sin(6.0*x*Math.PI) + 20.0*Math.sin(2.0*x*Math.PI)) * 2.0/3.0;
+    r += (20.0*Math.sin(x*Math.PI) + 40.0*Math.sin(x/3.0*Math.PI)) * 2.0/3.0;
+    r += (150.0*Math.sin(x/12.0*Math.PI) + 300.0*Math.sin(x/30.0*Math.PI)) * 2.0/3.0;
+    return r;
+  }
+  const dLat = tLat(lon - 105.0, lat - 35.0);
+  const dLon = tLon(lon - 105.0, lat - 35.0);
+  const radLat = lat / 180.0 * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - ee * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  const oLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI);
+  const oLon = (dLon * 180.0) / (a / sqrtMagic * Math.cos(radLat) * Math.PI);
+  return [lat + oLat, lon + oLon];
+}
+
+function bearing(lat1, lon1, lat2, lon2){
+  const rad = Math.PI / 180;
+  const y = Math.sin((lon2 - lon1) * rad) * Math.cos(lat2 * rad);
+  const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) -
+            Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos((lon2 - lon1) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+function dirName(deg){
+  const names = ["北", "东北", "东", "东南", "南", "西南", "西", "西北"];
+  return names[Math.round(deg / 45) % 8];
+}
+function relToMonitor(d){
+  // 监测点为 GCJ-02(高德取点), 无人机坐标同样转 GCJ-02 后计算, 保证一致
+  if (d.glat === undefined) return null;
+  const dist = haversine(MONITOR_LAT, MONITOR_LON, d.glat, d.glon);
+  const dir = dirName(bearing(MONITOR_LAT, MONITOR_LON, d.glat, d.glon));
+  return { dist, dir };
+}
+
+/* ================= 统计面板 ================= */
+function renderStats(){
+  const body = document.getElementById("statsBody");
+  const today = new Date().toDateString();
+  const todayRecs = records.filter(r => new Date(r.start).toDateString() === today);
+  const totalPts = records.reduce((s, r) => s + r.n, 0);
+  const avgDur = records.length ? Math.round(records.reduce((s, r) => s + (r.end - r.start), 0) / records.length / 1000) : 0;
+  const modelCnt = {};
+  for (const r of records) modelCnt[r.model] = (modelCnt[r.model] || 0) + 1;
+  const top = Object.entries(modelCnt).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const maxN = top.length ? top[0][1] : 1;
+  let h = `<div class="statCard"><h4>📊 汇总</h4>
+    <div class="statRow"><span>累计飞行记录</span><b>${records.length} 条</b></div>
+    <div class="statRow"><span>今日发现</span><b>${todayRecs.length} 条</b></div>
+    <div class="statRow"><span>累计航点</span><b>${totalPts} 个</b></div>
+    <div class="statRow"><span>平均飞行时长</span><b>${avgDur ? Math.floor(avgDur / 60) + " 分 " + (avgDur % 60) + " 秒" : "--"}</b></div>
+  </div>`;
+  h += `<div class="statCard"><h4>✈️ 机型分布 TOP5</h4>`;
+  if (!top.length) h += `<div class="statRow"><span>暂无数据</span></div>`;
+  for (const [m, c] of top) {
+    h += `<div class="statRow"><span>${esc(m)}</span><b>${c} 次</b></div>
+      <div class="barWrap"><div class="bar" style="width:${(c / maxN * 100).toFixed(0)}%"></div></div>`;
+  }
+  h += `</div>`;
+  body.innerHTML = h;
+}
+
+/* ================= 导出 GPX / CSV ================= */
+function download(name, content, mime){
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function exportGPX(){
+  if (!records.length) { logMsg("暂无飞行记录可导出"); return; }
+  const iso = t => new Date(t).toISOString();
+  let g = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RID-Monitor" xmlns="http://www.topografix.com/GPX/1/1">\n`;
+  records.forEach((r, i) => {
+    g += `  <trk><name>${esc(r.model)} #${i + 1} ${esc(r.mac)}</name><trkseg>\n`;
+    for (const p of r.points) {
+      g += `    <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><time>${iso(p.t)}</time></trkpt>\n`;
+    }
+    g += `  </trkseg></trk>\n`;
+  });
+  g += `</gpx>\n`;
+  download("rid_flight_records.gpx", g, "application/gpx+xml");
+  logMsg(`已导出 GPX (${records.length} 条记录)`);
+}
+function exportCSV(){
+  if (!records.length) { logMsg("暂无飞行记录可导出"); return; }
+  let csv = "\uFEFF机型,MAC,开始时间,结束时间,航点数,最大高度(m),最大速度(m/s)\n";
+  for (const r of records) {
+    csv += `${esc(r.model)},${r.mac},${new Date(r.start).toLocaleString()},${new Date(r.end).toLocaleString()},${r.n},${r.maxAlt},${r.maxSpd}\n`;
+  }
+  download("rid_flight_records.csv", csv, "text/csv;charset=utf-8");
+  logMsg(`已导出 CSV (${records.length} 条记录)`);
+}
+
+/* ================= 轨迹回放 ================= */
+let replayTimer = null, replayMarker = null, replayRec = null, replayIdx = 0;
+function playRecord(i){
+  if (!mapLoaded) return;
+  const r = records[i];
+  if (!r || r.points.length < 2) { logMsg("该记录航点不足, 无法回放"); return; }
+  stopReplay();
+  replayRec = r;
+  replayIdx = 0;
+  showRecordPath(i);   // 高亮路径
+  const p0 = wgsToGcj(r.points[0].lat, r.points[0].lon);
+  replayMarker = new AMap.Marker({ position: [p0[1], p0[0]],
+    content: '<div style="width:12px;height:12px;border-radius:50%;background:#ff3b3b;border:2px solid #fff;box-shadow:0 0 8px #ff3b3b"></div>',
+    offset: new AMap.Pixel(-6, -6), zIndex: 300 });
+  map.add(replayMarker);
+  document.getElementById("replayBar").style.display = "block";
+  document.getElementById("replayName").textContent = "▶ 回放: " + r.model;
+  updateReplayProg();
+  replayTimer = setInterval(() => {
+    replayIdx++;
+    if (replayIdx >= r.points.length) { stopReplay(); return; }
+    const p = wgsToGcj(r.points[replayIdx].lat, r.points[replayIdx].lon);
+    replayMarker.setPosition([p[1], p[0]]);
+    if (replayIdx % 5 === 0) map.setCenter([p[1], p[0]]);
+    updateReplayProg();
+  }, 120);
+}
+function updateReplayProg(){
+  if (!replayRec) return;
+  document.getElementById("replayProg").textContent =
+    Math.round(replayIdx / replayRec.points.length * 100) + "%";
+}
+function stopReplay(){
+  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+  if (replayMarker) { map.remove(replayMarker); replayMarker = null; }
+  replayRec = null;
+  document.getElementById("replayBar").style.display = "none";
+}
+
+function showRecordPath(i){
+  const r = records[i];
+  if (!r || !mapLoaded) return;
+  if (recLine) { map.remove(recLine); recLine = null; }
+  const path = r.points.map(p => { const g = wgsToGcj(p.lat, p.lon); return [g[1], g[0]]; });   // 转 GCJ-02
+  recLine = new AMap.Polyline({
+    path, strokeColor: "#ffb020", strokeOpacity: 0.9, strokeWeight: 4, strokeStyle: "solid"
+  });
+  map.add(recLine);
+  map.setFitView([recLine]);
+  logMsg("查看飞行记录: " + r.model + " (" + r.n + " 航点)");
+}
+
+function onSnap(snap){
+  const seen = new Set();
+  for (const d of snap.drones || []) {
+    if (!d.mac) continue;
+    seen.add(d.mac);
+    const prev = drones.get(d.mac);
+    const gj = d.lat !== undefined ? wgsToGcj(d.lat, d.lon) : null;
+    const gjo = d.olat !== undefined ? wgsToGcj(d.olat, d.olon) : null;
+    const entry = {
+      ...d, firstSeen: prev ? prev.firstSeen : Date.now(), trail: prev ? prev.trail : [],
+      glat: gj ? gj[0] : undefined, glon: gj ? gj[1] : undefined,   // GCJ-02(地图显示用)
+      glatOp: gjo ? gjo[0] : undefined, glonOp: gjo ? gjo[1] : undefined
+    };
+    recordTraitPoint(entry, d);
+    drones.set(d.mac, entry);
+  }
+  // 移除已不存在的(固件快照为全量) → 结束飞行会话并生成记录
+  for (const mac of [...drones.keys()]) {
+    if (!seen.has(mac)) {
+      finalizeRecord(mac, drones.get(mac));
+      drones.delete(mac); markers.delete(mac);
+    }
+  }
+  // 顶栏统计
+  const n = drones.size;
+  const nPos = [...drones.values()].filter(d => d.lat !== undefined).length;
+  document.getElementById("stN").textContent = n;
+  document.getElementById("stPos").textContent = nPos;
+  document.getElementById("stCh").textContent = "CH" + (snap.ch ?? "--");
+  const bat = snap.bat;
+  const elBat = document.getElementById("stBat");
+  elBat.textContent = bat >= 0 ? bat + "%" : "USB";
+  elBat.style.color = bat >= 0 && bat <= 20 ? "var(--red)" : "";
+  document.getElementById("listCnt").textContent = n + " 架";
+  document.getElementById("mapCnt").textContent = nPos + " 架有坐标";
+  document.getElementById("bottomStats").textContent =
+    `snap ${new Date().toLocaleTimeString()} · ch=${snap.ch ?? "--"} · bat=${bat >= 0 ? bat + "%" : "USB"}`;
+
+  renderList();
+  if (selectedMac && !drones.has(selectedMac)) selectedMac = null;
+  renderDetail();
+  updateMarkers();
+  checkAlerts(seen);          // 陌生无人机警报检测
+  if (mapLoaded && nPos > 0) fitView();
+}
+
+/* ================= 列表 ================= */
+function renderList(){
+  const body = document.getElementById("listBody");
+  const arr = [...drones.values()].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999));
+  if (!arr.length) { body.innerHTML = '<div style="color:var(--dim);font-size:12px;text-align:center;margin-top:30px">暂无无人机信号…</div>'; return; }
+  body.innerHTML = arr.map(d => {
+    const mac = d.mac, sel = mac === selectedMac;
+    const sig = signalBars(d.rssi);
+    const rel = relToMonitor(d);
+    const pos = d.lat !== undefined
+      ? (rel ? `${d.glat.toFixed(4)}, ${d.glon.toFixed(4)} · <span style="color:#ffb020">${rel.dist.toFixed(0)}m ${rel.dir}</span>` : `${d.glat.toFixed(4)}, ${d.glon.toFixed(4)}`)
+      : "无位置信息";
+    return `<div class="drow ${sel ? "sel" : ""}" data-mac="${mac}">
+      <div class="top">
+        <span class="sig">${sig}</span>
+        ${isWhitelisted(mac) ? '<span class="shield" title="已授权白名单">🛡</span>' : ""}
+        <span class="model">${esc(d.model || "未知机型")}</span>
+        <span class="rssi">${d.rssi ?? "--"}dBm</span>
+      </div>
+      <div class="id">${esc(d.id || "ID: 无")}</div>
+      <div class="pos">${pos}</div>
+      <span class="mark">${d.proto === 1 ? "国标" : "ASTM"}</span>
+    </div>`;
+  }).join("");
+  body.querySelectorAll(".drow").forEach(el => {
+    el.onclick = () => { selectedMac = el.dataset.mac; renderList(); renderDetail(); centerOnSelected(); };
+  });
+}
+function signalBars(rssi){
+  const lv = rssi >= -50 ? 4 : rssi >= -60 ? 3 : rssi >= -70 ? 2 : rssi >= -80 ? 1 : 0;
+  let s = "";
+  for (let i = 0; i < 4; i++) {
+    const h = [4, 6, 8, 11][i];
+    s += `<i class="${i < lv ? "on" : ""}" style="height:${h}px"></i>`;
+  }
+  return s;
+}
+
+/* ================= 详情 ================= */
+function renderDetail(){
+  const body = document.getElementById("detailBody");
+  const d = selectedMac ? drones.get(selectedMac) : null;
+  if (!d) {
+    body.innerHTML = '<div id="noSel">👈 从左侧列表或地图上<br>点击选择一架无人机</div>';
+    document.getElementById("detailName").textContent = "--";
+    return;
+  }
+  document.getElementById("detailName").textContent = d.model || "未知机型";
+  const dist = (d.glat !== undefined && d.glatOp !== undefined)
+    ? haversine(d.glat, d.glon, d.glatOp, d.glonOp) : null;   // 统一 GCJ-02
+  const rel = relToMonitor(d);
+  const proto = d.proto === 1
+    ? '<span class="tag cn">国标 CN 46750</span>' : '<span class="tag astm">ASTM F3411</span>';
+  body.innerHTML = `
+    <div class="dhero">
+      <div class="m">${esc(d.model || "未知机型")}</div>
+      <div class="t"><span>${proto}</span><span>${d.id ? "SN " + esc(d.id) : "无序列号"}</span></div>
+    </div>
+    <div class="kv">
+      <div class="row"><span class="k">信号强度</span><span class="v cyan">${d.rssi ?? "--"} dBm</span></div>
+      <div class="row"><span class="k">BSSID / MAC</span><span class="v">${esc(d.mac)}</span></div>
+      <div class="row"><span class="k">UAS ID</span><span class="v dim">${esc(d.id || "--")}</span></div>
+      <div class="row"><span class="k">型号识别</span><span class="v amber">${esc(d.model || "未识别")}</span></div>
+    </div>
+    <div class="group">飞机状态</div>
+    <div class="kv">
+      <div class="row"><span class="k">纬度</span><span class="v cyan">${d.glat !== undefined ? d.glat.toFixed(6) : "--"}</span></div>
+      <div class="row"><span class="k">经度</span><span class="v cyan">${d.glon !== undefined ? d.glon.toFixed(6) : "--"}</span></div>
+      <div class="row"><span class="k">高度</span><span class="v">${d.alt !== undefined ? d.alt.toFixed(1) + " m" : "--"}</span></div>
+      <div class="row"><span class="k">速度</span><span class="v green">${d.spd !== undefined ? d.spd.toFixed(1) + " m/s" : "--"}</span></div>
+    </div>
+    <div class="group">飞手(操作员)</div>
+    <div class="kv">
+      <div class="row"><span class="k">纬度</span><span class="v">${d.glatOp !== undefined ? d.glatOp.toFixed(6) : "--"}</span></div>
+      <div class="row"><span class="k">经度</span><span class="v">${d.glonOp !== undefined ? d.glonOp.toFixed(6) : "--"}</span></div>
+      <div class="row"><span class="k">与飞机距离</span><span class="v amber">${dist !== null ? dist.toFixed(0) + " m" : "--"}</span></div>
+    </div>
+    <div class="group">距监测点</div>
+    <div class="kv">
+      <div class="row"><span class="k">距离 / 方位</span><span class="v amber">${rel !== null ? rel.dist.toFixed(0) + " m · " + rel.dir + "方向" : "--"}</span></div>
+    </div>
+    <div class="group">监测信息</div>
+    <div class="kv">
+      <div class="row"><span class="k">首次发现</span><span class="v dim">${new Date(d.firstSeen).toLocaleTimeString()}</span></div>
+      <div class="row"><span class="k">跟踪状态</span><span class="v green">● 在线</span></div>
+    </div>
+    <div class="group">授权管理</div>
+    <div class="kv">
+      <div class="row"><span class="k">白名单</span>
+        <span class="v">
+        ${isWhitelisted(d.mac)
+          ? `<button class="btnSmall danger" id="wlRemove">移除授权</button>`
+          : `<button class="btnSmall" id="wlAdd">加入白名单</button>`}
+        </span>
+      </div>
+      <div class="row"><span class="k">说明</span><span class="v dim" style="font-size:11px">白名单内的无人机不会触发警报</span></div>
+    </div>`;
+  const wlAdd = document.getElementById("wlAdd");
+  if (wlAdd) wlAdd.onclick = () => { whitelistAdd(d.mac); if (alerted.has(d.mac)) alerted.delete(d.mac); stopAlert(); };
+  const wlRemove = document.getElementById("wlRemove");
+  if (wlRemove) wlRemove.onclick = () => whitelistRemove(d.mac);
+}
+function haversine(lat1, lon1, lat2, lon2){
+  const R = 6371000, rad = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * rad / 2) ** 2 +
+            Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin((lon2 - lon1) * rad / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ================= 地图(登录后加载) ================= */
+function loadAMapScript(){
+  const s = document.createElement("script");
+  s.src = AMAP_JS;
+  s.onload = () => initMap();   // 脚本就绪后初始化地图
+  document.head.appendChild(s);
+}
+function amapCfgIssue(){
+  if (AMAP_KEY.startsWith("YOUR_")) return "key";
+  if (window._AMapSecurityConfig && window._AMapSecurityConfig.securityJsCode &&
+      window._AMapSecurityConfig.securityJsCode.startsWith("YOUR_")) return "jscode";
+  return null;
+}
+let amapTry = 0;
+function initMap(){
+  if (!AMAP_JS) return;   // 未配置 Key
+  const tip = document.getElementById("mapTip");
+  const issue = amapCfgIssue();
+  if (typeof AMap === "undefined") {
+    if (++amapTry > 15) {  // ~7.5s 超时: 网络不通或 Key 无效
+      tip.style.display = "flex";
+      tip.innerHTML = "<b>高德地图加载失败</b><span>" +
+        (issue === "jscode" ? "已配置 Key, 但<code>securityJsCode</code>安全密钥未填写或无效(高德 2021 后申请的新 Key 必须配置)" :
+         issue === "key" ? "请填写 <code>AMAP_KEY</code>" : "网络不通或 Key 无效") + "</span>" +
+        "<code>securityJsCode = \"你的安全密钥\"</code><span style='font-size:11px'>列表与详情功能不受影响。</span>";
+      return;
+    }
+    tip.style.display = "flex";
+    tip.innerHTML = "<span>高德地图加载中…</span>";
+    setTimeout(initMap, 500);
+    return;
+  }
+  tip.style.display = "none";
+  try {
+    map = new AMap.Map("map", {
+      zoom: 13, center: [116.42, 39.91],
+      mapStyle: "amap://styles/darkblue", viewMode: "2D", resizeEnable: true
+    });
+    map.addControl(new AMap.Scale());
+    map.addControl(new AMap.ToolBar({ position: "RB" }));
+    mapLoaded = true;
+    document.getElementById("mapCnt").textContent = "--";
+  } catch (e) {
+    tip.style.display = "flex";
+    tip.innerHTML = "<b>高德地图初始化失败</b><span>" +
+      (issue === "jscode" ? "Key 已配置, 但<code>securityJsCode</code>安全密钥未填写或无效" : esc(e.message)) + "</span>";
+  }
+}
+function mkDiv(cls){
+  const div = document.createElement("div");
+  div.className = "mk " + cls;
+  return div;
+}
+function updateMarkers(){
+  if (!mapLoaded) return;
+  const hasPos = [...drones.values()].some(d => d.lat !== undefined);
+  if (!hasPos) { document.getElementById("mapCnt").textContent = "无坐标"; return; }
+  const nPos = [...drones.values()].filter(d => d.lat !== undefined).length;
+  document.getElementById("mapCnt").textContent = nPos + " 架有坐标";
+  for (const [mac, d] of drones) {
+    if (d.lat === undefined) { removeMarkers(mac); continue; }
+    const mlat = d.glat ?? d.lat, mlon = d.glon ?? d.lon;       // GCJ-02(地图)
+    const oplat = d.glatOp ?? d.olat, oplon = d.glonOp ?? d.olon;
+    let m = markers.get(mac);
+    if (!m) {
+      const dmk = new AMap.Marker({
+        position: [mlon, mlat],
+        content: mkDiv("drone"),
+        offset: new AMap.Pixel(-8, -8),
+        zIndex: 100,
+        label: { content: `<div style="background:rgba(7,11,20,.85);border:1px solid #16445c;color:#00e5ff;font-size:11px;padding:1px 6px;border-radius:4px;white-space:nowrap">${esc(d.model || "未知")}</div>`,
+                 direction: "top", offset: new AMap.Pixel(0, -4) }
+      });
+      dmk.on("click", () => { selectedMac = mac; renderList(); renderDetail(); centerOnSelected(); });
+      const opmk = new AMap.Marker({
+        position: [oplon, oplat],
+        content: mkDiv("op"),
+        offset: new AMap.Pixel(-8, -8),
+        zIndex: 90
+      });
+      const line = new AMap.Polyline({
+        path: [[mlon, mlat], [oplon, oplat]],
+        strokeColor: "#00e676", strokeOpacity: 0.35, strokeWeight: 1,
+        strokeStyle: "dashed"
+      });
+      m = { dmk, opmk, line, tl: null };
+      markers.set(mac, m);
+      map.add([dmk, opmk, line]);
+    } else {
+      m.dmk.setPosition([mlon, mlat]);
+      m.dmk.setLabel({ content: `<div style="background:rgba(7,11,20,.85);border:1px solid #16445c;color:#00e5ff;font-size:11px;padding:1px 6px;border-radius:4px;white-space:nowrap">${esc(d.model || "未知")}</div>`,
+                       direction: "top", offset: new AMap.Pixel(0, -4) });
+      if (d.olat !== undefined) { m.opmk.setPosition([oplon, oplat]); }
+      m.line.setPath([[mlon, mlat], [oplon, oplat]]);
+    }
+    // 实时轨迹线(≥2 航点, 坐标转 GCJ-02)
+    if (d.trail && d.trail.length >= 2) {
+      const path = d.trail.map(p => { const g = wgsToGcj(p.lat, p.lon); return [g[1], g[0]]; });
+      if (!m.tl) {
+        m.tl = new AMap.Polyline({
+          path, strokeColor: "#33ccff", strokeOpacity: 0.55, strokeWeight: 2, strokeStyle: "dashed"
+        });
+        map.add(m.tl);
+      } else {
+        m.tl.setPath(path);
+      }
+    }
+    m.dmk.setContent(mkDiv(selectedMac === mac ? "drone sel" : "drone"));
+  }
+  for (const mac of [...markers.keys()]) {
+    if (!drones.has(mac)) removeMarkers(mac);
+  }
+}
+function removeMarkers(mac){
+  const m = markers.get(mac);
+  if (m) {
+    const objs = [m.dmk, m.opmk, m.line];
+    if (m.tl) objs.push(m.tl);
+    map.remove(objs);
+    markers.delete(mac);
+  }
+}
+function fitView(){
+  if (!mapLoaded) return;
+  try { map.setFitView(); } catch (e) {}   // 无参: 自适应所有覆盖物
+}
+function centerOnSelected(){
+  if (!mapLoaded) return;
+  const d = drones.get(selectedMac);
+  if (d && d.lat !== undefined) {
+    map.setZoomAndCenter(16, [d.lon, d.lat]);
+    if (markers.has(selectedMac)) {
+      markers.get(selectedMac).dmk.setContent(mkDiv("drone sel"));
+    }
+  }
+}
+
+/* ================= 杂项 ================= */
+function logMsg(s){
+  document.getElementById("bottomMsg").textContent = "[" + new Date().toLocaleTimeString() + "] " + s;
+}
+function tickClock(){
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+/* ================= 启动 ================= */
+document.getElementById("loginBtn").onclick = doLogin;
+document.getElementById("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+document.getElementById("loginUser").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("loginPass").focus(); });
+
+window.addEventListener("load", () => {
+  if (sessionStorage.getItem("rid_auth") === "1") {
+    enterApp();               // 已登录(本会话): 直接进入
+  } else {
+    document.getElementById("loginOverlay").style.display = "flex";   // 等待登录(零网络请求)
+    setTimeout(() => document.getElementById("loginUser").focus(), 100);
+  }
+  setInterval(tickClock, 500);
+  tickClock();
+  logMsg("大屏已就绪, 请登录后使用");
+});
+</script>
+</body>
+</html>

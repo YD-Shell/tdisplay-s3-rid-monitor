@@ -1,0 +1,25 @@
+# PlatformIO
+.pio/
+.vscode/
+*.log
+
+# 构建产物
+*.bin
+*.uf2
+*.elf
+build/
+
+# 本地敏感/临时(勿上传)
+.local/
+
+# 测试残留备份
+.test_backup/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 系统
+.DS_Store
+Thumbs.db
